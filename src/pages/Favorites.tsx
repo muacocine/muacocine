@@ -6,20 +6,21 @@ import Navbar from '@/components/Navbar';
 import MovieCard from '@/components/MovieCard';
 import { Button } from '@/components/ui/button';
 import { Heart, Film } from 'lucide-react';
+import { tmdbApi, getImageUrl, getGenreNames } from '@/lib/tmdb';
 
-interface Movie {
+interface FavoriteMovie {
   id: string;
   title: string;
-  poster_url: string | null;
+  poster_url: string;
   release_year: number | null;
   rating: number | null;
-  genre: string[] | null;
+  genre: string[];
 }
 
 export default function Favorites() {
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
-  const [movies, setMovies] = useState<Movie[]>([]);
+  const [movies, setMovies] = useState<FavoriteMovie[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -41,16 +42,25 @@ export default function Favorites() {
         return;
       }
 
-      const movieIds = favorites.map(f => f.movie_id);
-      
-      const { data: moviesData } = await supabase
-        .from('movies')
-        .select('*')
-        .in('id', movieIds);
+      // Fetch movie details from TMDB
+      const moviePromises = favorites.map(async (fav) => {
+        try {
+          const movie = await tmdbApi.getMovieDetails(parseInt(fav.movie_id));
+          return {
+            id: movie.id.toString(),
+            title: movie.title,
+            poster_url: getImageUrl(movie.poster_path),
+            release_year: movie.release_date ? new Date(movie.release_date).getFullYear() : null,
+            rating: movie.vote_average ? Math.round(movie.vote_average * 10) / 10 : null,
+            genre: movie.genres?.map(g => g.name) || [],
+          };
+        } catch {
+          return null;
+        }
+      });
 
-      if (moviesData) {
-        setMovies(moviesData);
-      }
+      const movieResults = await Promise.all(moviePromises);
+      setMovies(movieResults.filter(Boolean) as FavoriteMovie[]);
       setLoading(false);
     }
 

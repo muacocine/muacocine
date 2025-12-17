@@ -1,17 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '@/integrations/supabase/client';
 import { Search, X, Star } from 'lucide-react';
 import { Input } from '@/components/ui/input';
-
-interface Movie {
-  id: string;
-  title: string;
-  poster_url: string | null;
-  release_year: number | null;
-  rating: number | null;
-  genre: string[] | null;
-}
+import { tmdbApi, TMDBMovie, getImageUrl, getGenreNames } from '@/lib/tmdb';
 
 interface SearchBarProps {
   isOpen: boolean;
@@ -20,7 +11,7 @@ interface SearchBarProps {
 
 export default function SearchBar({ isOpen, onClose }: SearchBarProps) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<Movie[]>([]);
+  const [results, setResults] = useState<TMDBMovie[]>([]);
   const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
@@ -39,23 +30,21 @@ export default function SearchBar({ isOpen, onClose }: SearchBarProps) {
       }
 
       setLoading(true);
-      const { data, error } = await supabase
-        .from('movies')
-        .select('*')
-        .or(`title.ilike.%${query}%,genre.cs.{${query}}`)
-        .limit(8);
-
-      if (!error && data) {
-        setResults(data);
+      try {
+        const data = await tmdbApi.searchMovies(query);
+        setResults(data.movies.slice(0, 10));
+      } catch (error) {
+        console.error('Error searching:', error);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     };
 
     const debounce = setTimeout(searchMovies, 300);
     return () => clearTimeout(debounce);
   }, [query]);
 
-  const handleSelect = (movieId: string) => {
+  const handleSelect = (movieId: number) => {
     navigate(`/movie/${movieId}`);
     setQuery('');
     setResults([]);
@@ -79,7 +68,7 @@ export default function SearchBar({ isOpen, onClose }: SearchBarProps) {
           <Input
             ref={inputRef}
             type="text"
-            placeholder="Buscar filmes por título ou gênero..."
+            placeholder="Buscar filmes..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -117,7 +106,7 @@ export default function SearchBar({ isOpen, onClose }: SearchBarProps) {
                   style={{ animationDelay: `${index * 50}ms` }}
                 >
                   <img 
-                    src={movie.poster_url || '/placeholder.svg'} 
+                    src={getImageUrl(movie.poster_path, 'w200')} 
                     alt={movie.title}
                     className="w-16 h-24 object-cover rounded-md"
                   />
@@ -126,17 +115,19 @@ export default function SearchBar({ isOpen, onClose }: SearchBarProps) {
                       {movie.title.toUpperCase()}
                     </h3>
                     <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                      {movie.rating && (
+                      {movie.vote_average && (
                         <span className="flex items-center gap-1 text-primary">
                           <Star className="w-4 h-4 fill-primary" />
-                          {movie.rating}
+                          {movie.vote_average.toFixed(1)}
                         </span>
                       )}
-                      {movie.release_year && <span>{movie.release_year}</span>}
-                      {movie.genre && movie.genre[0] && (
+                      {movie.release_date && (
+                        <span>{new Date(movie.release_date).getFullYear()}</span>
+                      )}
+                      {movie.genre_ids && movie.genre_ids.length > 0 && (
                         <>
                           <span>•</span>
-                          <span>{movie.genre.join(', ')}</span>
+                          <span>{getGenreNames(movie.genre_ids).slice(0, 2).join(', ')}</span>
                         </>
                       )}
                     </div>
@@ -150,17 +141,6 @@ export default function SearchBar({ isOpen, onClose }: SearchBarProps) {
           {query.length < 2 && (
             <div className="text-center py-12">
               <p className="text-muted-foreground">Digite pelo menos 2 caracteres para buscar</p>
-              <div className="mt-6 flex flex-wrap justify-center gap-2">
-                {['Ação', 'Drama', 'Ficção Científica', 'Thriller'].map((genre) => (
-                  <button
-                    key={genre}
-                    onClick={() => setQuery(genre)}
-                    className="px-4 py-2 bg-secondary text-secondary-foreground rounded-full hover:bg-primary hover:text-primary-foreground transition-colors"
-                  >
-                    {genre}
-                  </button>
-                ))}
-              </div>
             </div>
           )}
         </div>

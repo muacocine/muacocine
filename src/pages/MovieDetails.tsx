@@ -5,8 +5,9 @@ import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import Navbar from '@/components/Navbar';
-import VideoPlayer from '@/components/VideoPlayer';
 import MovieCard from '@/components/MovieCard';
+import RatingStars from '@/components/RatingStars';
+import { tmdbApi, TMDBMovie, getImageUrl, getBackdropUrl, getGenreNames } from '@/lib/tmdb';
 import { 
   Play, 
   Heart, 
@@ -14,76 +15,71 @@ import {
   Star, 
   Clock, 
   Calendar,
-  X
+  X,
+  Users
 } from 'lucide-react';
-
-interface Movie {
-  id: string;
-  title: string;
-  description: string | null;
-  poster_url: string | null;
-  backdrop_url: string | null;
-  release_year: number | null;
-  duration_minutes: number | null;
-  rating: number | null;
-  genre: string[] | null;
-  video_url: string | null;
-}
 
 export default function MovieDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   
-  const [movie, setMovie] = useState<Movie | null>(null);
-  const [relatedMovies, setRelatedMovies] = useState<Movie[]>([]);
+  const [movie, setMovie] = useState<TMDBMovie | null>(null);
   const [loading, setLoading] = useState(true);
   const [isFavorite, setIsFavorite] = useState(false);
   const [showPlayer, setShowPlayer] = useState(false);
+  const [userRating, setUserRating] = useState<number | null>(null);
+  const [averageRating, setAverageRating] = useState<number | null>(null);
+  const [ratingCount, setRatingCount] = useState(0);
 
   useEffect(() => {
     async function fetchMovie() {
       if (!id) return;
 
-      const { data, error } = await supabase
-        .from('movies')
-        .select('*')
-        .eq('id', id)
-        .maybeSingle();
+      try {
+        const movieData = await tmdbApi.getMovieDetails(parseInt(id));
+        setMovie(movieData);
 
-      if (error || !data) {
+        // Check if favorite
+        if (user) {
+          const { data: fav } = await supabase
+            .from('favorites')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('movie_id', id)
+            .maybeSingle();
+
+          setIsFavorite(!!fav);
+
+          // Get user's rating
+          const { data: rating } = await supabase
+            .from('ratings')
+            .select('rating')
+            .eq('user_id', user.id)
+            .eq('movie_id', id)
+            .maybeSingle();
+
+          if (rating) setUserRating(rating.rating);
+        }
+
+        // Get average rating
+        const { data: ratings } = await supabase
+          .from('ratings')
+          .select('rating')
+          .eq('movie_id', id);
+
+        if (ratings && ratings.length > 0) {
+          const avg = ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length;
+          setAverageRating(Math.round(avg * 10) / 10);
+          setRatingCount(ratings.length);
+        }
+      } catch (error) {
+        console.error('Error fetching movie:', error);
         toast.error('Filme não encontrado');
         navigate('/');
-        return;
+      } finally {
+        setLoading(false);
       }
-
-      setMovie(data);
-
-      // Fetch related movies by genre
-      if (data.genre && data.genre.length > 0) {
-        const { data: related } = await supabase
-          .from('movies')
-          .select('*')
-          .contains('genre', [data.genre[0]])
-          .neq('id', id)
-          .limit(6);
-
-        if (related) setRelatedMovies(related);
-      }
-
-      // Check if favorite
-      if (user) {
-        const { data: fav } = await supabase
-          .from('favorites')
-          .select('id')
-          .eq('user_id', user.id)
-          .eq('movie_id', id)
-          .maybeSingle();
-
-        setIsFavorite(!!fav);
-      }
-
-      setLoading(false);
     }
 
     fetchMovie();
@@ -103,7 +99,7 @@ export default function MovieDetails() {
         .from('favorites')
         .delete()
         .eq('user_id', user.id)
-        .eq('movie_id', movie.id);
+        .eq('movie_id', movie.id.toString());
 
       if (!error) {
         setIsFavorite(false);
@@ -112,7 +108,7 @@ export default function MovieDetails() {
     } else {
       const { error } = await supabase
         .from('favorites')
-        .insert({ user_id: user.id, movie_id: movie.id });
+        .insert({ user_id: user.id, movie_id: movie.id.toString() });
 
       if (!error) {
         setIsFavorite(true);
@@ -121,12 +117,59 @@ export default function MovieDetails() {
     }
   };
 
-  const formatDuration = (minutes: number | null) => {
+  const handleRating = async (rating: number) => {
+    if (!user) {
+      toast.error('Faça login para avaliar');
+      navigate('/auth');
+      return;
+    }
+
+    if (!movie) return;
+
+    const { error } = await supabase
+      .from('ratings')
+      .upsert({ 
+        user_id: user.id, 
+        movie_id: movie.id.toString(), 
+        rating,
+        updated_at: new Date().toISOString()
+      });
+
+    if (!error) {
+      setUserRating(rating);
+      toast.success('Avaliação salva!');
+      
+      // Refresh average
+      const { data: ratings } = await supabase
+        .from('ratings')
+        .select('rating')
+        .eq('movie_id', movie.id.toString());
+
+      if (ratings && ratings.length > 0) {
+        const avg = ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length;
+        setAverageRating(Math.round(avg * 10) / 10);
+        setRatingCount(ratings.length);
+      }
+    }
+  };
+
+  const formatDuration = (minutes: number | null | undefined) => {
     if (!minutes) return '';
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
     return `${hours}h ${mins}min`;
   };
+
+  // Get YouTube trailer key
+  const getTrailerKey = () => {
+    if (!movie?.videos?.results) return null;
+    const trailer = movie.videos.results.find(
+      v => v.site === 'YouTube' && (v.type === 'Trailer' || v.type === 'Teaser')
+    );
+    return trailer?.key || movie.videos.results[0]?.key;
+  };
+
+  const trailerKey = getTrailerKey();
 
   if (loading || !movie) {
     return (
@@ -136,41 +179,47 @@ export default function MovieDetails() {
     );
   }
 
+  const genres = movie.genres?.map(g => g.name) || (movie.genre_ids ? getGenreNames(movie.genre_ids) : []);
+  const director = movie.credits?.crew.find(c => c.job === 'Director');
+  const cast = movie.credits?.cast.slice(0, 6) || [];
+  const similarMovies = movie.similar?.results.slice(0, 6) || [];
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
 
       {/* Video Player Modal */}
-      {showPlayer && (
-        <div className="fixed inset-0 z-50 bg-background/95 flex items-center justify-center">
+      {showPlayer && trailerKey && (
+        <div className="fixed inset-0 z-50 bg-background/95 flex items-center justify-center p-4">
           <button 
             onClick={() => setShowPlayer(false)}
             className="absolute top-6 right-6 text-foreground hover:text-primary transition-colors z-10"
           >
             <X className="w-8 h-8" />
           </button>
-          <div className="w-full max-w-5xl px-4">
-            <VideoPlayer 
-              videoUrl={movie.video_url} 
-              posterUrl={movie.backdrop_url}
+          <div className="w-full max-w-5xl aspect-video">
+            <iframe
+              src={`https://www.youtube.com/embed/${trailerKey}?autoplay=1&rel=0`}
               title={movie.title}
+              className="w-full h-full rounded-lg"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
             />
           </div>
         </div>
       )}
 
       {/* Hero Section */}
-      <section className="relative min-h-[70vh] w-full overflow-hidden pt-20">
+      <section className="relative min-h-[80vh] w-full overflow-hidden pt-20">
         <div 
           className="absolute inset-0 bg-cover bg-center bg-no-repeat"
-          style={{ backgroundImage: `url(${movie.backdrop_url || movie.poster_url})` }}
+          style={{ backgroundImage: `url(${getBackdropUrl(movie.backdrop_path) || getImageUrl(movie.poster_path)})` }}
         />
         <div className="absolute inset-0 bg-gradient-hero" />
         <div className="absolute inset-0 bg-gradient-hero-bottom" />
         <div className="absolute inset-0 bg-background/40" />
 
         <div className="relative h-full container mx-auto px-4 flex items-center py-16">
-          {/* Back button */}
           <button 
             onClick={() => navigate(-1)}
             className="absolute top-4 left-4 flex items-center gap-2 text-muted-foreground hover:text-foreground transition-colors"
@@ -183,7 +232,7 @@ export default function MovieDetails() {
             {/* Poster */}
             <div className="flex-shrink-0">
               <img 
-                src={movie.poster_url || '/placeholder.svg'} 
+                src={getImageUrl(movie.poster_path, 'w500')} 
                 alt={movie.title}
                 className="w-64 rounded-lg shadow-card"
               />
@@ -193,22 +242,20 @@ export default function MovieDetails() {
             <div className="flex-1 max-w-2xl">
               {/* Metadata */}
               <div className="flex items-center gap-4 mb-4 flex-wrap">
-                {movie.rating && (
-                  <div className="flex items-center gap-1 bg-primary/20 text-primary px-3 py-1 rounded-full">
-                    <Star className="w-4 h-4 fill-primary" />
-                    <span className="font-semibold">{movie.rating}</span>
-                  </div>
-                )}
-                {movie.release_year && (
+                <div className="flex items-center gap-1 bg-primary/20 text-primary px-3 py-1 rounded-full">
+                  <Star className="w-4 h-4 fill-primary" />
+                  <span className="font-semibold">{movie.vote_average?.toFixed(1)}</span>
+                </div>
+                {movie.release_date && (
                   <div className="flex items-center gap-1 text-muted-foreground">
                     <Calendar className="w-4 h-4" />
-                    <span>{movie.release_year}</span>
+                    <span>{new Date(movie.release_date).getFullYear()}</span>
                   </div>
                 )}
-                {movie.duration_minutes && (
+                {movie.runtime && (
                   <div className="flex items-center gap-1 text-muted-foreground">
                     <Clock className="w-4 h-4" />
-                    <span>{formatDuration(movie.duration_minutes)}</span>
+                    <span>{formatDuration(movie.runtime)}</span>
                   </div>
                 )}
               </div>
@@ -219,9 +266,9 @@ export default function MovieDetails() {
               </h1>
 
               {/* Genres */}
-              {movie.genre && (
-                <div className="flex flex-wrap gap-2 mb-6">
-                  {movie.genre.map((g) => (
+              {genres.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {genres.map((g) => (
                     <span 
                       key={g} 
                       className="px-3 py-1 bg-secondary text-secondary-foreground text-sm rounded-full"
@@ -232,16 +279,51 @@ export default function MovieDetails() {
                 </div>
               )}
 
+              {/* User Rating */}
+              <div className="mb-6 p-4 bg-card rounded-lg">
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-1">Sua avaliação</p>
+                    <RatingStars 
+                      rating={userRating || 0} 
+                      onRate={handleRating}
+                      interactive={!!user}
+                    />
+                  </div>
+                  {averageRating && (
+                    <div className="text-right">
+                      <p className="text-sm text-muted-foreground mb-1">Avaliação dos usuários</p>
+                      <div className="flex items-center gap-2">
+                        <Star className="w-5 h-5 fill-primary text-primary" />
+                        <span className="text-xl font-bold text-foreground">{averageRating}</span>
+                        <span className="text-sm text-muted-foreground">({ratingCount} votos)</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {/* Description */}
-              <p className="text-lg text-foreground/80 mb-8">
-                {movie.description}
+              <p className="text-lg text-foreground/80 mb-6">
+                {movie.overview || 'Descrição não disponível.'}
               </p>
+
+              {/* Director */}
+              {director && (
+                <p className="text-muted-foreground mb-6">
+                  <span className="text-foreground font-medium">Diretor:</span> {director.name}
+                </p>
+              )}
 
               {/* Buttons */}
               <div className="flex flex-wrap gap-4">
-                <Button variant="hero" size="xl" onClick={() => setShowPlayer(true)}>
+                <Button 
+                  variant="hero" 
+                  size="xl" 
+                  onClick={() => trailerKey ? setShowPlayer(true) : toast.info('Trailer não disponível')}
+                >
                   <Play className="w-5 h-5 fill-primary-foreground" />
-                  Assistir Agora
+                  {trailerKey ? 'Assistir Trailer' : 'Sem Trailer'}
                 </Button>
                 <Button 
                   variant={isFavorite ? "default" : "hero-outline"} 
@@ -257,16 +339,54 @@ export default function MovieDetails() {
         </div>
       </section>
 
-      {/* Related Movies */}
-      {relatedMovies.length > 0 && (
+      {/* Cast */}
+      {cast.length > 0 && (
+        <section className="py-12">
+          <div className="container mx-auto px-4">
+            <h2 className="text-2xl md:text-3xl font-display text-foreground mb-6 flex items-center gap-2">
+              <Users className="w-6 h-6 text-primary" />
+              ELENCO
+            </h2>
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-4">
+              {cast.map((actor) => (
+                <div key={actor.id} className="text-center">
+                  <div className="aspect-square rounded-full overflow-hidden mb-2 bg-secondary">
+                    <img 
+                      src={actor.profile_path ? getImageUrl(actor.profile_path, 'w200') : '/placeholder.svg'}
+                      alt={actor.name}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <p className="text-sm font-medium text-foreground truncate">{actor.name}</p>
+                  <p className="text-xs text-muted-foreground truncate">{actor.character}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Similar Movies */}
+      {similarMovies.length > 0 && (
         <section className="py-12">
           <div className="container mx-auto px-4">
             <h2 className="text-2xl md:text-3xl font-display text-foreground mb-6">
-              FILMES RELACIONADOS
+              FILMES SEMELHANTES
             </h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              {relatedMovies.map((m, index) => (
-                <MovieCard key={m.id} movie={m} index={index} />
+              {similarMovies.map((m, index) => (
+                <MovieCard 
+                  key={m.id} 
+                  movie={{
+                    id: m.id.toString(),
+                    title: m.title,
+                    poster_url: getImageUrl(m.poster_path),
+                    release_year: m.release_date ? new Date(m.release_date).getFullYear() : null,
+                    rating: m.vote_average ? Math.round(m.vote_average * 10) / 10 : null,
+                    genre: m.genre_ids ? getGenreNames(m.genre_ids) : [],
+                  }} 
+                  index={index} 
+                />
               ))}
             </div>
           </div>
