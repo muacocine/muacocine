@@ -5,15 +5,19 @@ const IMAGE_BASE = 'https://image.tmdb.org/t/p';
 export interface TMDBMovie {
   id: number;
   title: string;
+  name?: string;
   overview: string;
   poster_path: string | null;
   backdrop_path: string | null;
   release_date: string;
+  first_air_date?: string;
   vote_average: number;
   vote_count: number;
   genre_ids?: number[];
   genres?: { id: number; name: string }[];
   runtime?: number;
+  number_of_seasons?: number;
+  number_of_episodes?: number;
   videos?: {
     results: {
       key: string;
@@ -29,6 +33,13 @@ export interface TMDBMovie {
   similar?: {
     results: TMDBMovie[];
   };
+  seasons?: {
+    id: number;
+    name: string;
+    season_number: number;
+    episode_count: number;
+    poster_path: string | null;
+  }[];
 }
 
 export interface TMDBGenre {
@@ -119,12 +130,45 @@ export const tmdbApi = {
     return { movies: data.results || [], totalPages: data.total_pages };
   },
 
-  async getBulkMovies(pages = 15): Promise<TMDBMovie[]> {
+  // TV Shows
+  async getTrendingTV(): Promise<TMDBMovie[]> {
     const { data, error } = await supabase.functions.invoke('tmdb-api', {
-      body: { action: 'bulk_movies', params: { pages } }
+      body: { action: 'trending_tv' }
     });
     if (error) throw error;
     return data.results || [];
+  },
+
+  async getPopularTV(page = 1): Promise<{ movies: TMDBMovie[]; totalPages: number }> {
+    const { data, error } = await supabase.functions.invoke('tmdb-api', {
+      body: { action: 'popular_tv', params: { page } }
+    });
+    if (error) throw error;
+    return { movies: data.results || [], totalPages: data.total_pages };
+  },
+
+  async getTVDetails(tvId: number): Promise<TMDBMovie> {
+    const { data, error } = await supabase.functions.invoke('tmdb-api', {
+      body: { action: 'tv_details', params: { tvId } }
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  async searchTVShows(query: string, page = 1): Promise<{ movies: TMDBMovie[]; totalPages: number }> {
+    const { data, error } = await supabase.functions.invoke('tmdb-api', {
+      body: { action: 'search_tv', params: { query, searchPage: page } }
+    });
+    if (error) throw error;
+    return { movies: data.results || [], totalPages: data.total_pages };
+  },
+
+  async getTVSeasonEpisodes(tvId: number, seasonNumber: number): Promise<any> {
+    const { data, error } = await supabase.functions.invoke('tmdb-api', {
+      body: { action: 'tv_season', params: { tvId, seasonNumber } }
+    });
+    if (error) throw error;
+    return data;
   }
 };
 
@@ -148,7 +192,16 @@ export const GENRE_MAP: Record<number, string> = {
   10770: 'Cinema TV',
   53: 'Thriller',
   10752: 'Guerra',
-  37: 'Faroeste'
+  37: 'Faroeste',
+  // TV Genres
+  10759: 'Ação & Aventura',
+  10762: 'Kids',
+  10763: 'Notícias',
+  10764: 'Reality',
+  10765: 'Sci-Fi & Fantasia',
+  10766: 'Novela',
+  10767: 'Talk Show',
+  10768: 'Guerra & Política'
 };
 
 export const getGenreNames = (genreIds: number[]): string[] => {
