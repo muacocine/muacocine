@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Play, Plus, Star, Info } from 'lucide-react';
+import { Play, Star, Info, Tv } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface Movie {
@@ -10,19 +10,22 @@ interface Movie {
   release_year: number | null;
   rating: number | null;
   genre: string[] | null;
+  isTV?: boolean;
 }
 
 interface MovieCardProps {
   movie: Movie;
   index?: number;
+  isTV?: boolean;
 }
 
-export default function MovieCard({ movie, index = 0 }: MovieCardProps) {
+export default function MovieCard({ movie, index = 0, isTV = false }: MovieCardProps) {
   const [isHovered, setIsHovered] = useState(false);
   const navigate = useNavigate();
 
   const handleClick = () => {
-    navigate(`/movie/${movie.id}`);
+    const path = isTV || movie.isTV ? `/tv/${movie.id}` : `/movie/${movie.id}`;
+    navigate(path);
   };
 
   return (
@@ -33,16 +36,20 @@ export default function MovieCard({ movie, index = 0 }: MovieCardProps) {
       onMouseLeave={() => setIsHovered(false)}
       onClick={handleClick}
     >
-      {/* Card */}
       <div className="relative aspect-[2/3] rounded-lg overflow-hidden shadow-card transition-all duration-300 group-hover:scale-105 group-hover:shadow-gold">
-        {/* Poster */}
         <img
           src={movie.poster_url || '/placeholder.svg'}
           alt={movie.title}
           className="w-full h-full object-cover"
         />
 
-        {/* Rating Badge */}
+        {/* TV Badge */}
+        {(isTV || movie.isTV) && (
+          <div className="absolute top-3 right-3 bg-primary text-primary-foreground p-1.5 rounded-md">
+            <Tv className="w-3 h-3" />
+          </div>
+        )}
+
         {movie.rating && (
           <div className="absolute top-3 left-3 flex items-center gap-1 bg-background/80 backdrop-blur-sm text-primary px-2 py-1 rounded-md">
             <Star className="w-3 h-3 fill-primary" />
@@ -50,7 +57,6 @@ export default function MovieCard({ movie, index = 0 }: MovieCardProps) {
           </div>
         )}
 
-        {/* Hover Overlay */}
         <div 
           className={`absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent transition-opacity duration-300 ${
             isHovered ? 'opacity-100' : 'opacity-0'
@@ -82,7 +88,7 @@ export default function MovieCard({ movie, index = 0 }: MovieCardProps) {
                 className="h-9 w-9"
                 onClick={(e) => {
                   e.stopPropagation();
-                  navigate(`/movie/${movie.id}`);
+                  handleClick();
                 }}
               >
                 <Info className="w-4 h-4" />

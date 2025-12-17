@@ -39,9 +39,18 @@ Deno.serve(async (req) => {
         url = `${TMDB_BASE_URL}/trending/movie/week?api_key=${apiKey}&language=${language}`;
         break;
 
+      case 'trending_tv':
+        url = `${TMDB_BASE_URL}/trending/tv/week?api_key=${apiKey}&language=${language}`;
+        break;
+
       case 'popular':
         const popularPage = params?.page || 1;
         url = `${TMDB_BASE_URL}/movie/popular?api_key=${apiKey}&language=${language}&page=${popularPage}`;
+        break;
+
+      case 'popular_tv':
+        const popularTvPage = params?.page || 1;
+        url = `${TMDB_BASE_URL}/tv/popular?api_key=${apiKey}&language=${language}&page=${popularTvPage}`;
         break;
 
       case 'top_rated':
@@ -64,9 +73,24 @@ Deno.serve(async (req) => {
         url = `${TMDB_BASE_URL}/movie/${movieId}?api_key=${apiKey}&language=${language}&append_to_response=videos,credits,similar`;
         break;
 
+      case 'tv_details':
+        const { tvId } = params;
+        url = `${TMDB_BASE_URL}/tv/${tvId}?api_key=${apiKey}&language=${language}&append_to_response=videos,credits,similar`;
+        break;
+
+      case 'tv_season':
+        const { tvId: showId, seasonNumber } = params;
+        url = `${TMDB_BASE_URL}/tv/${showId}/season/${seasonNumber}?api_key=${apiKey}&language=${language}`;
+        break;
+
       case 'search':
         const { query, searchPage = 1 } = params;
         url = `${TMDB_BASE_URL}/search/movie?api_key=${apiKey}&language=${language}&query=${encodeURIComponent(query)}&page=${searchPage}&include_adult=false`;
+        break;
+
+      case 'search_tv':
+        const { query: tvQuery, searchPage: tvSearchPage = 1 } = params;
+        url = `${TMDB_BASE_URL}/search/tv?api_key=${apiKey}&language=${language}&query=${encodeURIComponent(tvQuery)}&page=${tvSearchPage}&include_adult=false`;
         break;
 
       case 'genres':
@@ -77,30 +101,6 @@ Deno.serve(async (req) => {
         const { genreId, genrePage = 1 } = params;
         url = `${TMDB_BASE_URL}/discover/movie?api_key=${apiKey}&language=${language}&with_genres=${genreId}&sort_by=popularity.desc&page=${genrePage}`;
         break;
-
-      case 'bulk_movies':
-        // Fetch multiple pages for bulk loading
-        const totalPages = Math.min(params?.pages || 15, 15);
-        const allMovies: any[] = [];
-        
-        for (let p = 1; p <= totalPages; p++) {
-          const pageUrl = `${TMDB_BASE_URL}/movie/popular?api_key=${apiKey}&language=${language}&page=${p}`;
-          const pageResponse = await fetch(pageUrl);
-          const pageData = await pageResponse.json();
-          if (pageData.results) {
-            allMovies.push(...pageData.results);
-          }
-        }
-        
-        return new Response(
-          JSON.stringify({ 
-            success: true, 
-            results: allMovies,
-            total: allMovies.length,
-            image_base: TMDB_IMAGE_BASE
-          }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
 
       default:
         return new Response(

@@ -7,6 +7,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/hooks/useAuth';
 import { tmdbApi, TMDBMovie, getImageUrl, getBackdropUrl, getGenreNames } from '@/lib/tmdb';
 import { toast } from 'sonner';
+import { Tv } from 'lucide-react';
 
 export default function Index() {
   const [trending, setTrending] = useState<TMDBMovie[]>([]);
@@ -14,6 +15,8 @@ export default function Index() {
   const [topRated, setTopRated] = useState<TMDBMovie[]>([]);
   const [nowPlaying, setNowPlaying] = useState<TMDBMovie[]>([]);
   const [upcoming, setUpcoming] = useState<TMDBMovie[]>([]);
+  const [trendingTV, setTrendingTV] = useState<TMDBMovie[]>([]);
+  const [popularTV, setPopularTV] = useState<TMDBMovie[]>([]);
   const [actionMovies, setActionMovies] = useState<TMDBMovie[]>([]);
   const [comedyMovies, setComedyMovies] = useState<TMDBMovie[]>([]);
   const [horrorMovies, setHorrorMovies] = useState<TMDBMovie[]>([]);
@@ -29,6 +32,8 @@ export default function Index() {
         topRatedData,
         nowPlayingData,
         upcomingData,
+        trendingTVData,
+        popularTVData,
         actionData,
         comedyData,
         horrorData,
@@ -39,10 +44,12 @@ export default function Index() {
         tmdbApi.getTopRated(),
         tmdbApi.getNowPlaying(),
         tmdbApi.getUpcoming(),
-        tmdbApi.getByGenre(28), // Action
-        tmdbApi.getByGenre(35), // Comedy
-        tmdbApi.getByGenre(27), // Horror
-        tmdbApi.getByGenre(878), // Sci-Fi
+        tmdbApi.getTrendingTV(),
+        tmdbApi.getPopularTV(),
+        tmdbApi.getByGenre(28),
+        tmdbApi.getByGenre(35),
+        tmdbApi.getByGenre(27),
+        tmdbApi.getByGenre(878),
       ]);
 
       setTrending(trendingData);
@@ -50,13 +57,15 @@ export default function Index() {
       setTopRated(topRatedData.movies);
       setNowPlaying(nowPlayingData.movies);
       setUpcoming(upcomingData.movies);
+      setTrendingTV(trendingTVData);
+      setPopularTV(popularTVData.movies);
       setActionMovies(actionData.movies);
       setComedyMovies(comedyData.movies);
       setHorrorMovies(horrorData.movies);
       setScifiMovies(scifiData.movies);
     } catch (error) {
       console.error('Error fetching movies:', error);
-      toast.error('Erro ao carregar filmes. Verifique a API key do TMDB.');
+      toast.error('Erro ao carregar conteúdo. Verifique a API key do TMDB.');
     } finally {
       setLoading(false);
     }
@@ -68,14 +77,29 @@ export default function Index() {
 
   const transformMovie = (movie: TMDBMovie) => ({
     id: movie.id.toString(),
-    title: movie.title,
+    title: movie.title || movie.name || '',
     poster_url: getImageUrl(movie.poster_path),
     backdrop_url: getBackdropUrl(movie.backdrop_path),
-    release_year: movie.release_date ? new Date(movie.release_date).getFullYear() : null,
+    release_year: (movie.release_date || movie.first_air_date) 
+      ? new Date(movie.release_date || movie.first_air_date || '').getFullYear() 
+      : null,
     rating: movie.vote_average ? Math.round(movie.vote_average * 10) / 10 : null,
     genre: movie.genre_ids ? getGenreNames(movie.genre_ids) : [],
     description: movie.overview,
     duration_minutes: movie.runtime || null,
+  });
+
+  const transformTV = (show: TMDBMovie) => ({
+    id: show.id.toString(),
+    title: show.name || show.title || '',
+    poster_url: getImageUrl(show.poster_path),
+    backdrop_url: getBackdropUrl(show.backdrop_path),
+    release_year: show.first_air_date ? new Date(show.first_air_date).getFullYear() : null,
+    rating: show.vote_average ? Math.round(show.vote_average * 10) / 10 : null,
+    genre: show.genre_ids ? getGenreNames(show.genre_ids) : [],
+    description: show.overview,
+    duration_minutes: null,
+    isTV: true,
   });
 
   const featuredMovie = trending[0] ? transformMovie(trending[0]) : null;
@@ -103,10 +127,8 @@ export default function Index() {
     <div className="min-h-screen bg-background">
       <Navbar />
       
-      {/* Hero Section */}
       {featuredMovie && <HeroSection movie={featuredMovie} />}
 
-      {/* Movie Rows */}
       <div className="-mt-20 relative z-10">
         <MovieRow 
           title="Em Alta Agora" 
@@ -116,6 +138,19 @@ export default function Index() {
         <MovieRow 
           title="Populares" 
           movies={popular.slice(0, 10).map(transformMovie)} 
+        />
+
+        {/* TV Shows Section */}
+        <MovieRow 
+          title="Séries em Alta"
+          movies={trendingTV.slice(0, 10).map(transformTV)}
+          isTV
+        />
+
+        <MovieRow 
+          title="Séries Populares"
+          movies={popularTV.slice(0, 10).map(transformTV)}
+          isTV
         />
 
         <MovieRow 
@@ -128,12 +163,12 @@ export default function Index() {
           movies={nowPlaying.slice(0, 10).map(transformMovie)} 
         />
 
+        <CategorySection />
+
         <MovieRow 
           title="Em Breve" 
           movies={upcoming.slice(0, 10).map(transformMovie)} 
         />
-
-        <CategorySection />
 
         <MovieRow 
           title="Ação" 
@@ -156,7 +191,6 @@ export default function Index() {
         />
       </div>
 
-      {/* Footer */}
       <footer className="py-12 border-t border-border mt-12">
         <div className="container mx-auto px-4">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
