@@ -1,62 +1,84 @@
-import { useEffect, useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { useEffect, useState, useCallback } from 'react';
 import Navbar from '@/components/Navbar';
 import HeroSection from '@/components/HeroSection';
 import MovieRow from '@/components/MovieRow';
+import CategorySection from '@/components/CategorySection';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useAuth } from '@/hooks/useAuth';
-
-interface Movie {
-  id: string;
-  title: string;
-  description: string | null;
-  poster_url: string | null;
-  backdrop_url: string | null;
-  release_year: number | null;
-  duration_minutes: number | null;
-  rating: number | null;
-  genre: string[] | null;
-  featured: boolean | null;
-}
+import { tmdbApi, TMDBMovie, getImageUrl, getBackdropUrl, getGenreNames } from '@/lib/tmdb';
+import { toast } from 'sonner';
 
 export default function Index() {
-  const [movies, setMovies] = useState<Movie[]>([]);
-  const [featuredMovie, setFeaturedMovie] = useState<Movie | null>(null);
+  const [trending, setTrending] = useState<TMDBMovie[]>([]);
+  const [popular, setPopular] = useState<TMDBMovie[]>([]);
+  const [topRated, setTopRated] = useState<TMDBMovie[]>([]);
+  const [nowPlaying, setNowPlaying] = useState<TMDBMovie[]>([]);
+  const [upcoming, setUpcoming] = useState<TMDBMovie[]>([]);
+  const [actionMovies, setActionMovies] = useState<TMDBMovie[]>([]);
+  const [comedyMovies, setComedyMovies] = useState<TMDBMovie[]>([]);
+  const [horrorMovies, setHorrorMovies] = useState<TMDBMovie[]>([]);
+  const [scifiMovies, setScifiMovies] = useState<TMDBMovie[]>([]);
   const [loading, setLoading] = useState(true);
   const { user } = useAuth();
 
-  useEffect(() => {
-    async function fetchMovies() {
-      const { data, error } = await supabase
-        .from('movies')
-        .select('*')
-        .order('created_at', { ascending: false });
+  const fetchMovies = useCallback(async () => {
+    try {
+      const [
+        trendingData,
+        popularData,
+        topRatedData,
+        nowPlayingData,
+        upcomingData,
+        actionData,
+        comedyData,
+        horrorData,
+        scifiData
+      ] = await Promise.all([
+        tmdbApi.getTrending(),
+        tmdbApi.getPopular(),
+        tmdbApi.getTopRated(),
+        tmdbApi.getNowPlaying(),
+        tmdbApi.getUpcoming(),
+        tmdbApi.getByGenre(28), // Action
+        tmdbApi.getByGenre(35), // Comedy
+        tmdbApi.getByGenre(27), // Horror
+        tmdbApi.getByGenre(878), // Sci-Fi
+      ]);
 
-      if (error) {
-        console.error('Error fetching movies:', error);
-        return;
-      }
-
-      if (data) {
-        setMovies(data);
-        const featured = data.find(m => m.featured) || data[0];
-        setFeaturedMovie(featured);
-      }
+      setTrending(trendingData);
+      setPopular(popularData.movies);
+      setTopRated(topRatedData.movies);
+      setNowPlaying(nowPlayingData.movies);
+      setUpcoming(upcomingData.movies);
+      setActionMovies(actionData.movies);
+      setComedyMovies(comedyData.movies);
+      setHorrorMovies(horrorData.movies);
+      setScifiMovies(scifiData.movies);
+    } catch (error) {
+      console.error('Error fetching movies:', error);
+      toast.error('Erro ao carregar filmes. Verifique a API key do TMDB.');
+    } finally {
       setLoading(false);
     }
-
-    fetchMovies();
   }, []);
 
-  // Group movies by genre
-  const getMoviesByGenre = (genre: string) => {
-    return movies.filter(m => m.genre?.includes(genre)).slice(0, 6);
-  };
+  useEffect(() => {
+    fetchMovies();
+  }, [fetchMovies]);
 
-  const actionMovies = getMoviesByGenre('Ação');
-  const dramaMovies = getMoviesByGenre('Drama');
-  const scifiMovies = getMoviesByGenre('Ficção Científica');
-  const thrillerMovies = getMoviesByGenre('Thriller');
+  const transformMovie = (movie: TMDBMovie) => ({
+    id: movie.id.toString(),
+    title: movie.title,
+    poster_url: getImageUrl(movie.poster_path),
+    backdrop_url: getBackdropUrl(movie.backdrop_path),
+    release_year: movie.release_date ? new Date(movie.release_date).getFullYear() : null,
+    rating: movie.vote_average ? Math.round(movie.vote_average * 10) / 10 : null,
+    genre: movie.genre_ids ? getGenreNames(movie.genre_ids) : [],
+    description: movie.overview,
+    duration_minutes: movie.runtime || null,
+  });
+
+  const featuredMovie = trending[0] ? transformMovie(trending[0]) : null;
 
   if (loading) {
     return (
@@ -86,27 +108,52 @@ export default function Index() {
 
       {/* Movie Rows */}
       <div className="-mt-20 relative z-10">
-        {user && (
-          <MovieRow title="Continue Assistindo" movies={movies.slice(0, 6)} />
-        )}
+        <MovieRow 
+          title="Em Alta Agora" 
+          movies={trending.slice(0, 10).map(transformMovie)} 
+        />
         
-        <MovieRow title="Em Alta" movies={movies.slice(0, 6)} />
-        
-        {actionMovies.length > 0 && (
-          <MovieRow title="Ação" movies={actionMovies} />
-        )}
-        
-        {dramaMovies.length > 0 && (
-          <MovieRow title="Drama" movies={dramaMovies} />
-        )}
-        
-        {scifiMovies.length > 0 && (
-          <MovieRow title="Ficção Científica" movies={scifiMovies} />
-        )}
-        
-        {thrillerMovies.length > 0 && (
-          <MovieRow title="Thriller" movies={thrillerMovies} />
-        )}
+        <MovieRow 
+          title="Populares" 
+          movies={popular.slice(0, 10).map(transformMovie)} 
+        />
+
+        <MovieRow 
+          title="Mais Bem Avaliados" 
+          movies={topRated.slice(0, 10).map(transformMovie)} 
+        />
+
+        <MovieRow 
+          title="Em Cartaz" 
+          movies={nowPlaying.slice(0, 10).map(transformMovie)} 
+        />
+
+        <MovieRow 
+          title="Em Breve" 
+          movies={upcoming.slice(0, 10).map(transformMovie)} 
+        />
+
+        <CategorySection />
+
+        <MovieRow 
+          title="Ação" 
+          movies={actionMovies.slice(0, 10).map(transformMovie)} 
+        />
+
+        <MovieRow 
+          title="Comédia" 
+          movies={comedyMovies.slice(0, 10).map(transformMovie)} 
+        />
+
+        <MovieRow 
+          title="Terror" 
+          movies={horrorMovies.slice(0, 10).map(transformMovie)} 
+        />
+
+        <MovieRow 
+          title="Ficção Científica" 
+          movies={scifiMovies.slice(0, 10).map(transformMovie)} 
+        />
       </div>
 
       {/* Footer */}
@@ -117,7 +164,7 @@ export default function Index() {
               <span className="text-2xl font-display text-gradient-gold">CINEMAX</span>
             </div>
             <p className="text-muted-foreground text-sm">
-              © 2024 CineMax. Todos os direitos reservados.
+              © 2024 CineMax. Dados fornecidos por TMDB.
             </p>
           </div>
         </div>
